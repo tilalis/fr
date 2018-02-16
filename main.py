@@ -26,8 +26,8 @@ class IncidentPointer(PresentationDocument):
     incident_id = StringField(id=True)
     owner = StringField()
 
-    @staticmethod
-    def presentation(document):
+    @classmethod
+    def presentation(cls, document):
         return {
             'incident_id': document.incident_id,
             'owner': document.owner
@@ -40,8 +40,8 @@ class OngoingIncidentPointer(PresentationDocument):
     incident_id = StringField(id=True)
     owner = StringField()
 
-    @staticmethod
-    def presentation(document):
+    @classmethod
+    def presentation(cls, document):
         return {
             'incident_id': document.incident_id,
             'owner': document.owner
@@ -51,12 +51,12 @@ class OngoingIncidentPointer(PresentationDocument):
 class Incident(Document):
     _container = '/incidents'
 
-    incident_id = StringField(id=True)
+    incident_id = StringField(id=True, presentational=True)
     confirmed = BooleanField(default=False)
-    owner = StringField()
-    reliability = IntField(default=0)
-    confidence = IntField(default=0)
-    created = DateField()
+    owner = StringField(presentational=True)
+    reliability = IntField(default=0, presentational=True)
+    confidence = IntField(default=0, presentational=True)
+    created = DateField(presentational=True)
 
     @staticmethod
     def on_save(document):
@@ -89,8 +89,8 @@ class Incident(Document):
             ignore_non_existing=True
         ).delete()
 
-    @staticmethod
-    def presentation(document):
+    @classmethod
+    def presentation(cls, document):
         return {
             'id': document.incident_id,
             'rel': document.reliability * document.confidence,
@@ -100,6 +100,7 @@ class Incident(Document):
 
 
 if __name__ == "__main__":
-    incident = Incident().get('123')
-    incident.confirmed = False
-    incident.save()
+    for i in range(0, 20):
+        with Incident().get(i) as incident:
+            incident.reliability = 3
+            incident.confirmed = not incident.confirmed

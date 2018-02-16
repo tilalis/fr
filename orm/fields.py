@@ -13,8 +13,9 @@ class FieldMeta(abc.ABCMeta):
 class BaseField(metaclass=FieldMeta):
     __field_type__ = None
 
-    def __init__(self, id=False, default=None):
+    def __init__(self, id=False, default=None, presentational=False):
         self._id = id
+        self._presentational = presentational
 
         if default is None or isinstance(default, self.__field_type__):
             self._value = default
@@ -24,6 +25,14 @@ class BaseField(metaclass=FieldMeta):
     @property
     def is_id(self):
         return self._id
+
+    @property
+    def presentational(self):
+        return self._presentational
+
+    @presentational.setter
+    def presentational(self, value):
+        self._presentational = bool(value)
 
     @property
     def value(self):

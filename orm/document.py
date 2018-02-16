@@ -9,19 +9,6 @@ from _adapters import RedisAdapter, FirebaseAdapter
 from orm import get_connections
 
 
-class _Flag:
-    def __init__(self, value=False):
-        self._value = value
-
-    @property
-    def value(self):
-        return self._value
-
-    @value.setter
-    def value(self, value):
-        self._value = bool(value)
-
-
 class DocumentMetaclass(abc.ABCMeta):
     def __new__(mcs, name, bases, attrs):
         conn = attrs.get('_connection')
@@ -41,11 +28,19 @@ class DocumentMetaclass(abc.ABCMeta):
             if isinstance(item, BaseField)
         ]
 
+        presentational = set()
+
         for fieldname in fieldnames:
-            fields[fieldname] = attrs[fieldname]
+            field = attrs[fieldname]
+            fields[fieldname] = field
+
+            if field.presentational:
+                presentational.add(fieldname)
+
             del attrs[fieldname]
 
         attrs['__fields__'] = fields
+        attrs['_presentational'] = presentational
 
         return super().__new__(mcs, name, bases, attrs)
 
@@ -82,12 +77,12 @@ class Document(metaclass=DocumentMetaclass):
         self._ignore_non_existing = ignore_non_existing
         self._path = "{}/".format(self._container)
         self._fetched = override
-        self._changed = False
+        self._changed = set()
 
     def get(self, id):
         # TODO: Make this method static
 
-        if not id:
+        if id is None:
             raise AttributeError("Document must have id field!")
 
         if self._redis.exists(id):
@@ -113,7 +108,7 @@ class Document(metaclass=DocumentMetaclass):
             previous = field.value
 
             if previous != value:
-                self._changed = True
+                self._changed.add(key)
                 field.value = value
 
         else:
@@ -147,29 +142,19 @@ class Document(metaclass=DocumentMetaclass):
         else:
             presentation = document_view
 
-        # TODO: Update firebase only if presentation has changed
-        #
-        # # class-level
-        # __presentational___ = {
-        #   'field_one',
-        #   'field_two'
-        # }
-        #
-        # # self._changed -- a set containing changed fields names
-        # if self._changed & self.__presentational__:
-        #     if callable(self.presentation):
-        #         presentation = self.presentation(document_view)
-        #     else:
-        #         presentation = document_view
-        #
-        #     self._firebase.update(self._path, self._id, presentation)
-
-        self._changed = False
         self._redis.upsert(self._id, document_view)
-        self._firebase.update(self._path, self._id, presentation)
+
+        if any((
+                force,
+                self._presentational and self._changed & self._presentational,
+                not self._presentational and self._changed
+        )):
+            self._firebase.update(self._path, self._id, presentation)
 
         if callable(self.on_save):
             self.on_save(document_view)
+
+        self._changed = set()
 
     def delete(self):
         if self._redis.exists(self._id):
@@ -180,12 +165,22 @@ class Document(metaclass=DocumentMetaclass):
                 document_view = DocumentView(self)
                 self.on_delete(document_view)
 
+    @classmethod
+    def presentation(cls, document):
+        return {
+            key: value
+            for key, value in document
+            if key in cls._presentational
+        }
+
     on_save = None
+    on_presentation_save = None  # NOTE: Inactive yet
+
     on_delete = None
-    presentation = None
 
 
 class DocumentView(dict):
+    # TODO: Add __changed__ field
     def __init__(self, document: Document):
         super().__init__()
 
@@ -202,6 +197,9 @@ class DocumentView(dict):
 
 
 class PresentationDocument(Document, metaclass=abc.ABCMeta):
+    # TODO: Create another metaclass
+    # TODO: Make fields presentational by default for PresentationDocument
+
     def __init__(self, ignore_non_existing=False, override=False, **kwargs):
         super().__init__(ignore_non_existing, override, **kwargs)
 
@@ -226,7 +224,7 @@ class PresentationDocument(Document, metaclass=abc.ABCMeta):
             self._redis.delete(self._id)
             self._firebase.delete(self._path, self._view_id)
 
-    @staticmethod
+    @classmethod
     @abstractmethod
-    def presentation(document: DocumentView):
+    def presentation(cls, document: DocumentView):
         pass
