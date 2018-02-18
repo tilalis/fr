@@ -13,9 +13,10 @@ class FieldMeta(abc.ABCMeta):
 class BaseField(metaclass=FieldMeta):
     __field_type__ = None
 
-    def __init__(self, id=False, default=None, presentational=False):
+    def __init__(self, id=False, default=None, presentation=False):
+        # TODO: add immutable option, make ids immutable by default
         self._id = id
-        self._presentational = presentational
+        self._presentation = presentation
 
         if default is None or isinstance(default, self.__field_type__):
             self._value = default
@@ -27,12 +28,12 @@ class BaseField(metaclass=FieldMeta):
         return self._id
 
     @property
-    def presentational(self):
-        return self._presentational
+    def presentation(self):
+        return self._presentation
 
-    @presentational.setter
-    def presentational(self, value):
-        self._presentational = bool(value)
+    @presentation.setter
+    def presentation(self, value):
+        self._presentation = bool(value)
 
     @property
     def value(self):
@@ -52,6 +53,10 @@ class BaseField(metaclass=FieldMeta):
                 )) from exception
 
         self._value = value
+
+    @value.deleter
+    def value(self):
+        self._value = None
 
 
 class AnyField(BaseField):

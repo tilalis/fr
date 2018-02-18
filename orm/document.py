@@ -28,19 +28,31 @@ class DocumentMetaclass(abc.ABCMeta):
             if isinstance(item, BaseField)
         ]
 
-        presentational = set()
+        presentation_fields = set()
 
         for fieldname in fieldnames:
             field = attrs[fieldname]
             fields[fieldname] = field
 
-            if field.presentational:
-                presentational.add(fieldname)
+            if field.presentation:
+                presentation_fields.add(fieldname)
+
+            if field.is_id:
+                id_field = copy.copy(field)
+                id_field._presentation = False
+                id_field._id = False
+                fields['id'] = id_field
 
             del attrs[fieldname]
 
         attrs['__fields__'] = fields
-        attrs['_presentational'] = presentational
+
+        # If we have "presentation" in class name, then all of its fields are presentational
+        # Should think of a better way
+        if "presentation" not in name.lower():
+            attrs['_presentation_fields'] = presentation_fields
+        else:
+            attrs['_presentation_fields'] = set(fieldnames)
 
         return super().__new__(mcs, name, bases, attrs)
 
@@ -79,15 +91,16 @@ class Document(metaclass=DocumentMetaclass):
         self._fetched = override
         self._changed = set()
 
-    def get(self, id):
-        # TODO: Make this method static
-
+    @classmethod
+    def get(cls, id):
         if id is None:
             raise AttributeError("Document must have id field!")
 
-        if self._redis.exists(id):
-            object.__setattr__(self, '_id', id)
-            return self._fetch()
+        document = cls(id=id)
+
+        if document._redis.exists(id):
+            object.__setattr__(document, '_id', id)
+            return document._fetch()
 
         raise LookupError('No such document with id: {}'.format(id))
 
@@ -146,8 +159,9 @@ class Document(metaclass=DocumentMetaclass):
 
         if any((
                 force,
-                self._presentational and self._changed & self._presentational,
-                not self._presentational and self._changed
+                self._presentation_fields and self._changed & self._presentation_fields,
+                not self._presentation_fields and self._changed,
+                not exists
         )):
             self._firebase.update(self._path, self._id, presentation)
 
@@ -170,17 +184,14 @@ class Document(metaclass=DocumentMetaclass):
         return {
             key: value
             for key, value in document
-            if key in cls._presentational
+            if key in cls._presentation_fields
         }
 
     on_save = None
-    on_presentation_save = None  # NOTE: Inactive yet
-
     on_delete = None
 
 
 class DocumentView(dict):
-    # TODO: Add __changed__ field
     def __init__(self, document: Document):
         super().__init__()
 
@@ -189,6 +200,9 @@ class DocumentView(dict):
             for key, item in document._fields.items()
         })
 
+        self.__changed__ = frozenset(document._changed)
+        self.__presentation_changed__ = frozenset(document._changed & document._presentation_fields)
+
     def __getattr__(self, item):
         if item in self:
             return self[item]
@@ -196,10 +210,7 @@ class DocumentView(dict):
         raise AttributeError("No such attribute: {}!".format(item))
 
 
-class PresentationDocument(Document, metaclass=abc.ABCMeta):
-    # TODO: Create another metaclass
-    # TODO: Make fields presentational by default for PresentationDocument
-
+class PresentationDocument(Document):
     def __init__(self, ignore_non_existing=False, override=False, **kwargs):
         super().__init__(ignore_non_existing, override, **kwargs)
 
@@ -223,8 +234,3 @@ class PresentationDocument(Document, metaclass=abc.ABCMeta):
         if self._redis.exists(self._id):
             self._redis.delete(self._id)
             self._firebase.delete(self._path, self._view_id)
-
-    @classmethod
-    @abstractmethod
-    def presentation(cls, document: DocumentView):
-        pass

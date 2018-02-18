@@ -12,7 +12,7 @@ orm.connect(
             'password': 'password'
     },
     firebase={
-            'cred': 'cred.json',
+            'cred': '',
             'database': 'https://fr.firebaseio.com/',
             'bucket': 'fr.appspot.com',
 
@@ -51,12 +51,14 @@ class OngoingIncidentPointer(PresentationDocument):
 class Incident(Document):
     _container = '/incidents'
 
-    incident_id = StringField(id=True, presentational=True)
+    incident_id = StringField(id=True, presentation=True)
     confirmed = BooleanField(default=False)
-    owner = StringField(presentational=True)
-    reliability = IntField(default=0, presentational=True)
-    confidence = IntField(default=0, presentational=True)
-    created = DateField(presentational=True)
+    action = StringField()
+    firstResponder = StringField(presentation=True)
+    owner = StringField(presentation=True)
+    reliability = IntField(default=0, presentation=True)
+    confidence = IntField(default=0, presentation=True)
+    created = DateField(presentation=True)
 
     @staticmethod
     def on_save(document):
@@ -95,12 +97,47 @@ class Incident(Document):
             'id': document.incident_id,
             'rel': document.reliability * document.confidence,
             'created': document.created.isoformat(),
-            'owner': document.owner.replace(' ', '-')
+            'owner': document.owner.replace(' ', '-'),
+            'firstResponder': document.firstResponder
         }
 
 
 if __name__ == "__main__":
+    # TODO: Add unit tests
+
+    import datetime
+    from enum import Enum
+
+    class Type(Enum):
+        CREATE = 1
+        DELETE = 2
+        UPDATE_PRESENTATION = 3
+        UPDATE_CACHE = 4
+        UPDATE_FULL = 5
+
+    action = Type.UPDATE_PRESENTATION
+
     for i in range(0, 20):
-        with Incident().get(i) as incident:
-            incident.reliability = 3
-            incident.confirmed = not incident.confirmed
+        if action == Type.CREATE:
+            Incident(
+                incident_id=i,
+                owner='123',
+                reliability=i % 3,
+                confidence=i * 2,
+                confirmed=not bool(i % 2),
+                created=datetime.datetime.utcnow()
+            ).save()
+        elif action == Type.DELETE:
+            Incident.get(i).delete()
+        elif action == Type.UPDATE_PRESENTATION:
+            with Incident.get(i) as incident:
+                incident.reliability = i / 4
+        elif action == Type.UPDATE_CACHE:
+            with Incident.get(i) as incident:
+                incident.confirmed = not incident.confirmed
+        elif action == Type.UPDATE_FULL:
+            with Incident.get(i) as incident:
+                incident.firstResponder = 'AAB'
+                incident.action = 'cleared'
+
+
