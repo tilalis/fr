@@ -21,29 +21,39 @@ class FirebaseAdapter:
 
     @staticmethod
     def read(path):
-        return db.reference(path=path).get()
+        return db.reference(
+            path=path
+        ).get()
 
     @staticmethod
-    def create(path, value):
+    def create(path, key, value):
         FirebaseAdapter._execute(
-            lambda: db.reference(path=path).set(value)
+            lambda: db.reference(
+                path=FirebaseAdapter._path(path, key)
+            ).set(value)
         )
 
     @staticmethod
-    def update(path, value: dict):
+    def update(path, key, value: dict):
         FirebaseAdapter._execute(
-            lambda: db.reference(path=path).update({
+            lambda: db.reference(
+                path=FirebaseAdapter._path(path, key)
+            ).update({
                 k: v
                 for k, v in value.items() if value is not None
             })
         )
 
     @staticmethod
-    def delete(path):
+    def delete(path, key):
         FirebaseAdapter._execute(
-            lambda: db.reference(path=path).delete()
+            lambda: db.reference(path=FirebaseAdapter._path(path, key)).delete()
         )
         
     @staticmethod
     def _execute(action, *args, **kwargs):
         Thread(target=functools.partial(action, *args, **kwargs)).start()
+
+    @staticmethod
+    def _path(path, key):
+        return "{}{}".format(path, key)

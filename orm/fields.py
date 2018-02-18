@@ -3,23 +3,36 @@ import datetime
 
 
 class FieldMeta(abc.ABCMeta):
-    def __new__(mcls, name, bases, namespace, **kwargs):
+    def __new__(mcs, name, bases, namespace, **kwargs):
         if '__field_type__' not in namespace:
             raise AttributeError("Field must have __field_type__ attribute!")
 
-        return super().__new__(mcls, name, bases, namespace, **kwargs)
+        return super().__new__(mcs, name, bases, namespace)
 
 
 class BaseField(metaclass=FieldMeta):
     __field_type__ = None
 
-    def __init__(self, id=False):
-        self._value = None
+    def __init__(self, id=False, default=None, presentational=False):
         self._id = id
+        self._presentational = presentational
+
+        if default is None or isinstance(default, self.__field_type__):
+            self._value = default
+        else:
+            raise TypeError("Default value should be None of of the same type as field!")
 
     @property
     def is_id(self):
         return self._id
+
+    @property
+    def presentational(self):
+        return self._presentational
+
+    @presentational.setter
+    def presentational(self, value):
+        self._presentational = bool(value)
 
     @property
     def value(self):
