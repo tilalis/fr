@@ -1,12 +1,9 @@
 import abc
 import copy
 
-from abc import abstractmethod
-
 from .fields import BaseField
-from _adapters import RedisAdapter, FirebaseAdapter
 
-from orm import get_connections
+from orm import connections, adapters
 
 
 class DocumentMetaclass(abc.ABCMeta):
@@ -17,9 +14,11 @@ class DocumentMetaclass(abc.ABCMeta):
             firebase_props = conn.get('firebase', {})
             attrs['_container'] = firebase_props.pop('container', '')
 
+            redis_adapter, firebase_adapter = adapters()
+
             attrs.update({
-                '_redis': RedisAdapter(**redis_props) if redis_props else None,
-                '_firebase': FirebaseAdapter(**firebase_props) if firebase_props else None
+                '_redis': redis_adapter(**redis_props) if redis_props else None,
+                '_firebase': firebase_adapter(**firebase_props) if firebase_props else None
             })
 
         fields = {}
@@ -38,21 +37,23 @@ class DocumentMetaclass(abc.ABCMeta):
                 presentation_fields.add(fieldname)
 
             if field.is_id:
-                id_field = copy.copy(field)
-                id_field._presentation = False
-                id_field._id = False
-                fields['id'] = id_field
+                fields['id'] = field
 
             del attrs[fieldname]
 
         attrs['__fields__'] = fields
+        attrs['_required_fields'] = set(
+            name for name, field in fields.items()
+            if field.required
+        )
 
-        # If we have "presentation" in class name, then all of its fields are presentational
+        # If we class with "presentation" in bases, then all of its fields are presentational
         # Should think of a better way
-        if "presentation" not in name.lower():
-            attrs['_presentation_fields'] = presentation_fields
-        else:
+
+        if any("presentation" in repr(base).lower() for base in bases):
             attrs['_presentation_fields'] = set(fieldnames)
+        else:
+            attrs['_presentation_fields'] = presentation_fields
 
         return super().__new__(mcs, name, bases, attrs)
 
@@ -61,10 +62,8 @@ class Document(metaclass=DocumentMetaclass):
     def __new__(cls, *args, **kwargs):
         document = super().__new__(cls)
 
-        fields = copy.deepcopy(cls.__fields__)
-
         if not ({'_redis', '_firebase'} <= cls.__dict__.keys()):
-            redis, firebase = get_connections()
+            redis, firebase = connections()
             if not redis and not firebase:
                 raise ConnectionError('Connections to Firebase and Redis not found')
 
@@ -72,37 +71,69 @@ class Document(metaclass=DocumentMetaclass):
             object.__setattr__(document, '_redis', redis)
             object.__setattr__(document, '_firebase', firebase)
 
-        document_id = None
-        for name, field in fields.items():
-            if name in kwargs:
-                field.value = kwargs[name]
-
-            if not document_id and field.is_id:
-                document_id = field.value
-
-        object.__setattr__(document, '_id', document_id)
-        object.__setattr__(document, '_fields', fields)
-
         return document
 
     def __init__(self, ignore_non_existing=False, override=False, **kwargs):
-        self._ignore_non_existing = ignore_non_existing
-        self._path = "{}/".format(self._container)
-        self._fetched = override
-        self._changed = set()
+        cls = self.__class__
+        fields = copy.deepcopy(cls.__fields__)
+        required_fields = cls._required_fields
+
+        document_id, filled_fields = self._init_fields(fields, ignore_non_existing=ignore_non_existing, **kwargs)
+
+        if document_id is None:
+            raise LookupError("Document without id!")
+
+        if (filled_fields & required_fields) != required_fields:
+            raise AttributeError("The following fields are required: {}".format(
+                required_fields - filled_fields
+            ))
+
+        self._init_options(ignore_non_existing=ignore_non_existing, override=override)
 
     @classmethod
     def get(cls, id):
         if id is None:
             raise AttributeError("Document must have id field!")
 
-        document = cls(id=id)
+        document = cls.__new__(cls)
+        document._init_fields(cls.__fields__)
+        document._init_options(
+            ignore_non_existing=False,
+            override=False
+        )
 
         if document._redis.exists(id):
             object.__setattr__(document, '_id', id)
             return document._fetch()
 
         raise LookupError('No such document with id: {}'.format(id))
+
+    def _init_fields(self, fields, ignore_non_existing=False, **kwargs):
+        filled_fields = set()
+        for name, value in kwargs.items():
+            field = fields.get(name)
+
+            if field is None:
+                if ignore_non_existing:
+                    continue
+
+                raise AttributeError("No such field {}".format(name))
+
+            field.value = value
+            filled_fields.add(name)
+
+        document_id = fields['id'].value
+
+        object.__setattr__(self, '_id', document_id)
+        object.__setattr__(self, '_fields', fields)
+
+        return document_id, filled_fields
+
+    def _init_options(self, ignore_non_existing, override):
+        self._ignore_non_existing = ignore_non_existing
+        self._path = "{}/".format(self._container)
+        self._fetched = override
+        self._changed = set(self._fields.keys())
 
     def _fetch(self):
         entity = self._redis.read(self._id)
@@ -113,6 +144,8 @@ class Document(metaclass=DocumentMetaclass):
                 raise AttributeError("There is no such field as {}".format(key))
 
         self._fetched = True
+        self._changed = set()
+
         return self
 
     def __setattr__(self, key, value):
@@ -146,7 +179,7 @@ class Document(metaclass=DocumentMetaclass):
             return
 
         if not self._fetched and exists:
-            raise Exception("Document already exists!")
+            raise Exception("Document with id {} already exists!".format(self._id))
 
         document_view = DocumentView(self)
 
@@ -183,7 +216,7 @@ class Document(metaclass=DocumentMetaclass):
     def presentation(cls, document):
         return {
             key: value
-            for key, value in document
+            for key, value in document.items()
             if key in cls._presentation_fields
         }
 

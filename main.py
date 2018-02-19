@@ -26,13 +26,6 @@ class IncidentPointer(PresentationDocument):
     incident_id = StringField(id=True)
     owner = StringField()
 
-    @classmethod
-    def presentation(cls, document):
-        return {
-            'incident_id': document.incident_id,
-            'owner': document.owner
-        }
-
 
 class OngoingIncidentPointer(PresentationDocument):
     _container = '/ongoingEvents'
@@ -40,20 +33,13 @@ class OngoingIncidentPointer(PresentationDocument):
     incident_id = StringField(id=True)
     owner = StringField()
 
-    @classmethod
-    def presentation(cls, document):
-        return {
-            'incident_id': document.incident_id,
-            'owner': document.owner
-        }
-
 
 class Incident(Document):
     _container = '/incidents'
 
     incident_id = StringField(id=True, presentation=True)
     confirmed = BooleanField(default=False)
-    action = StringField()
+    action = StringField(required=True)
     firstResponder = StringField(presentation=True)
     owner = StringField(presentation=True)
     reliability = IntField(default=0, presentation=True)
@@ -62,6 +48,9 @@ class Incident(Document):
 
     @staticmethod
     def on_save(document):
+        if 'confirmed' not in document.__changed__:
+            return
+
         ip = IncidentPointer(
             **document,
             ignore_non_existing=True
@@ -114,8 +103,9 @@ if __name__ == "__main__":
         UPDATE_PRESENTATION = 3
         UPDATE_CACHE = 4
         UPDATE_FULL = 5
+        UPDATE_CACHE_ONLY = 6
 
-    action = Type.UPDATE_PRESENTATION
+    action = Type.CREATE
 
     for i in range(0, 20):
         if action == Type.CREATE:
@@ -125,6 +115,7 @@ if __name__ == "__main__":
                 reliability=i % 3,
                 confidence=i * 2,
                 confirmed=not bool(i % 2),
+                action='create',
                 created=datetime.datetime.utcnow()
             ).save()
         elif action == Type.DELETE:
@@ -139,5 +130,9 @@ if __name__ == "__main__":
             with Incident.get(i) as incident:
                 incident.firstResponder = 'AAB'
                 incident.action = 'cleared'
+        elif action == Type.UPDATE_CACHE_ONLY:
+            with Incident.get(i) as incident:
+                incident.action = "hey"
+
 
 
