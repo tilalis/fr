@@ -13,10 +13,12 @@ class FieldMeta(abc.ABCMeta):
 class BaseField(metaclass=FieldMeta):
     __field_type__ = None
 
-    def __init__(self, id=False, default=None, presentation=False):
+    def __init__(self, id=False, default=None, presentation=False, required=False):
         # TODO: add immutable option, make ids immutable by default
+        # TODO: add `name` option
         self._id = id
         self._presentation = presentation
+        self._required = required
 
         if default is None or isinstance(default, self.__field_type__):
             self._value = default
@@ -26,6 +28,10 @@ class BaseField(metaclass=FieldMeta):
     @property
     def is_id(self):
         return self._id
+
+    @property
+    def required(self):
+        return self._required
 
     @property
     def presentation(self):

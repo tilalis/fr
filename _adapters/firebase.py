@@ -35,14 +35,18 @@ class FirebaseAdapter:
 
     @staticmethod
     def update(path, key, value: dict):
-        FirebaseAdapter._execute(
-            lambda: db.reference(
-                path=FirebaseAdapter._path(path, key)
-            ).update({
-                k: v
-                for k, v in value.items() if value is not None
-            })
-        )
+        no_none = {
+            k: v
+            for k, v in value.items()
+            if v is not None
+        }
+
+        if no_none:
+            FirebaseAdapter._execute(
+                lambda: db.reference(
+                    path=FirebaseAdapter._path(path, key)
+                ).update(no_none)
+            )
 
     @staticmethod
     def delete(path, key):
